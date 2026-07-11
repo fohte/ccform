@@ -1,0 +1,73 @@
+name: Bootstrap
+
+# Generates lockfiles on the first push after the repository is initialized
+# from the template, then deletes itself so it never runs again.
+
+on:
+  push:
+    # Branch-only to avoid running on tag pushes; the self-removal step's
+    # `git push HEAD:<ref>` is not designed for refs/tags.
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    if: "github.event.head_commit.message != 'chore: bootstrap lockfiles'"
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      RUSTC_WRAPPER: 'sccache'
+
+    steps:
+      - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        id: octo-sts
+        with:
+          scope: fohte
+          identity: ${{ github.event.repository.name }}-bootstrap
+          domain: octo-sts.fohte.net
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.octo-sts.outputs.token }}
+
+      - name: Check whether any lockfile is missing
+        id: check
+        run: |
+          missing=false
+          if [ ! -f Cargo.lock ]; then missing=true; fi
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
+      # Run rustup before mise-action to prevent race condition.
+      - if: steps.check.outputs.missing == 'true'
+        run: rustup show
+
+      - name: Run sccache-cache
+        if: steps.check.outputs.missing == 'true'
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - if: steps.check.outputs.missing == 'true'
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.0
+
+      - name: Generate lockfiles
+        if: steps.check.outputs.missing == 'true'
+        run: scripts/bootstrap
+
+      - name: Self-remove and commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/bootstrap.yml
+          if [ -f Cargo.lock ]; then git add Cargo.lock; fi
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: bootstrap lockfiles"
+          git push origin "HEAD:${GITHUB_REF#refs/heads/}"

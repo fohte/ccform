@@ -1,0 +1,130 @@
+name: Test
+
+on:
+  push:
+    branches-ignore:
+      # Skip release-please branches (Release PRs) since they only update CHANGELOG and version
+      - release-please--branches--*
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      RUSTC_WRAPPER: 'sccache'
+
+    steps:
+      - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        id: octo-sts
+        with:
+          scope: fohte
+          identity: ${{ github.event.repository.name }}
+          domain: octo-sts.fohte.net
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Check if current commit is auto-format by bot
+        id: check-auto-format
+        run: |
+          commit_message=$(git log -1 --format=%s)
+          commit_author=$(git log -1 --format=%an)
+          echo "Current commit message: $commit_message"
+          echo "Current commit author: $commit_author"
+
+          # Skip if the current commit is an auto-format commit by a bot
+          # to prevent infinite loop: auto-format push -> CI -> auto-format push -> ...
+          if [ "$commit_message" = "style: auto-format" ] && [[ "$commit_author" == *"[bot]"* ]]; then
+            echo "skip_commit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip_commit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Run rustup before mise-action to prevent race condition.
+      # Multiple cargo: tools in mise.toml trigger parallel rustup component downloads,
+      # causing "could not rename downloaded file" errors.
+      - run: rustup show
+
+      # Run sccache-action before mise-action so that sccache binary is
+      # available when mise installs cargo tools (RUSTC_WRAPPER=sccache).
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.0
+
+      - run: cargo fetch
+
+      - name: Run lefthook
+        id: lefthook
+        continue-on-error: true
+        env:
+          # pinact's min-age check calls the GitHub API; without a token it hits
+          # the 60 req/h unauthenticated limit shared per IP and fails on CI.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: lefthook run pre-commit --all-files
+
+      # Formatters configured with `stage_fixed: true` run `git add` after formatting,
+      # which stages the changes.
+      # commit-action uses `git ls-files --modified` which only detects unstaged changes.
+      # https://github.com/suzuki-shunsuke/commit-action/blob/87b297f0ce551411b43d1880f4fb3cbc60381055/action.yaml#L57
+      # We need to unstage the changes so commit-action can detect them.
+      - name: Unstage changes for commit-action
+        run: git restore --staged .
+
+      - name: Commit formatted files
+        if: ${{ !cancelled() && steps.check-auto-format.outputs.skip_commit != 'true' }}
+        uses: suzuki-shunsuke/commit-action@06e3b49d4706498d325d29bd85adc82ecf2f5d8f # v1.0.0
+        with:
+          commit_message: 'style: auto-format'
+          workflow: deny
+          github_token: ${{ steps.octo-sts.outputs.token }}
+
+      - name: Fail if lefthook failed
+        if: steps.lefthook.outcome == 'failure'
+        run: exit 1
+
+  unit-test:
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      RUSTC_WRAPPER: 'sccache'
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - run: rustup show
+
+      # Run sccache-action before mise-action so that sccache binary is
+      # available when mise installs cargo tools (RUSTC_WRAPPER=sccache).
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.0
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install llvm-tools-preview
+        run: rustup component add llvm-tools-preview
+
+      - name: Run tests with coverage
+        run: cargo llvm-cov --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: false

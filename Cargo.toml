@@ -1,0 +1,18 @@
+[package]
+name = "ccform"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "=2.0.18"
+
+[dev-dependencies]
+rstest = "=0.26.1"
+
+[lints.clippy]
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+disallowed_macros = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"

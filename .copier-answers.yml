@@ -1,0 +1,16 @@
+# Changes here will be overwritten by Copier
+_commit: v0.8.14
+_src_path: https://github.com/fohte/generic-boilerplate
+auto_merge_release_pr: false
+binary_name: ccform
+description: Terraform-style declarative manager for Claude Code settings via a Lua
+    DSL
+is_public: true
+project_name: ccform
+release_binary: true
+release_type: rust
+repo_language: en
+subpackages: []
+type: rust
+use_coverage: true
+use_release_please: true
