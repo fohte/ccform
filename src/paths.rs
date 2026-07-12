@@ -50,6 +50,8 @@ fn resolved() -> Resolved {
 /// same for `get_config_home()`/`get_state_home()` — which degrades
 /// `entry_path()`/`settings_path()`/etc. to cwd-relative paths instead of
 /// erroring, since this module's public functions are infallible by design.
+/// Not deprecated on the toolchain pinned in `rust-toolchain.toml`, so this
+/// avoids taking on the `home` crate as a dependency for a single call.
 fn home_dir() -> PathBuf {
     std::env::home_dir().unwrap_or_default()
 }
