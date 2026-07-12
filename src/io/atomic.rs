@@ -40,6 +40,9 @@ pub enum Error {
     #[error("failed to read directory {path}")]
     ReadDir { path: PathBuf, source: io::Error },
 
+    #[error("failed to sync directory {path}")]
+    SyncDir { path: PathBuf, source: io::Error },
+
     #[error("failed to serialize JSON for {path}")]
     SerializeJson {
         path: PathBuf,
@@ -99,7 +102,20 @@ pub fn write_bytes(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
             to: path.to_path_buf(),
             source,
         }
-    })
+    })?;
+
+    // rename(2) is atomic, but the directory entry it updates is not synced
+    // to disk with it: without this, a crash right after a successful
+    // rename can still resurrect the old file on remount.
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|source| Error::SyncDir {
+            path: parent.to_path_buf(),
+            source,
+        })
 }
 
 /// Serializes `value` as pretty-printed JSON and writes it atomically with mode 0600.
