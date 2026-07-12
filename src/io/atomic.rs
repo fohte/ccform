@@ -165,10 +165,13 @@ fn is_stale_tmp_name(name: &str) -> bool {
         && nonce.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Scans `dir` for leftover `*.tmp.<pid>.<nonce>` files (e.g. from a crash mid-write),
-/// logs a warning for each to stderr, and returns their paths. Does not delete them.
-/// A missing `dir` is not an error.
-pub fn warn_stale_tmp_files(dir: &Path) -> Result<Vec<PathBuf>> {
+/// Scans `dir` for leftover `*.tmp.<pid>.<nonce>` files matching the naming
+/// convention used by [`write_bytes`]. This only matches on the name: it does
+/// not check whether the owning process is still alive, so a tmp file from a
+/// concurrently running `ccform` process can be reported too. Treat the
+/// result as a best-effort hint, not proof of a crash. A missing `dir` is not
+/// an error.
+fn find_stale_tmp_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -191,16 +194,24 @@ pub fn warn_stale_tmp_files(dir: &Path) -> Result<Vec<PathBuf>> {
             continue;
         };
         if is_stale_tmp_name(name) {
-            let path = entry.path();
-            eprintln!(
-                "warning: stale temporary file left behind by a previous run: {}",
-                path.display()
-            );
-            stale.push(path);
+            stale.push(entry.path());
         }
     }
     stale.sort();
 
+    Ok(stale)
+}
+
+/// Calls [`find_stale_tmp_files`] and logs a warning to stderr for each match
+/// found. Does not delete them.
+pub fn warn_stale_tmp_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let stale = find_stale_tmp_files(dir)?;
+    for path in &stale {
+        eprintln!(
+            "warning: stale temporary file left behind by a previous run: {}",
+            path.display()
+        );
+    }
     Ok(stale)
 }
 
