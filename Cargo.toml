@@ -2,9 +2,22 @@
 name = "ccform"
 version = "0.1.0"
 edition = "2024"
+description = "Terraform-style declarative manager for Claude Code settings via a Lua DSL"
+license = "MIT"
+repository = "https://github.com/fohte/ccform"
+keywords = ["claude-code", "cli", "configuration", "lua"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+anyhow = "=1.0.103"
+clap = { version = "=4.6.1", features = ["derive"] }
+dialoguer = "=0.12.0"
+mlua = { version = "=0.12.0", features = ["lua54", "vendored", "serde"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = { version = "=1.0.150", features = ["preserve_order"] }
+sysinfo = "=0.39.6"
 thiserror = "=2.0.18"
+xdg = "=3.0.0"
 
 [dev-dependencies]
 rstest = "=0.26.1"
