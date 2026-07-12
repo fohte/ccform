@@ -9,7 +9,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -63,10 +63,20 @@ fn tmp_path_for(path: &Path) -> PathBuf {
 }
 
 fn write_tmp_file(tmp_path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
-    let mut file = File::create(tmp_path).map_err(|source| Error::CreateTempFile {
-        path: tmp_path.to_path_buf(),
-        source,
-    })?;
+    // `.mode()` narrows the window where the file is readable with looser,
+    // umask-derived permissions, but the kernel still masks it by umask
+    // (unlike chmod), so the explicit set_permissions below remains the
+    // only umask-independent guarantee of the final mode.
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(mode)
+        .open(tmp_path)
+        .map_err(|source| Error::CreateTempFile {
+            path: tmp_path.to_path_buf(),
+            source,
+        })?;
     file.write_all(bytes)
         .map_err(|source| Error::WriteTempFile {
             path: tmp_path.to_path_buf(),
@@ -76,9 +86,13 @@ fn write_tmp_file(tmp_path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
         path: tmp_path.to_path_buf(),
         source,
     })?;
-    fs::set_permissions(tmp_path, fs::Permissions::from_mode(mode)).map_err(|source| {
+    set_permissions(tmp_path, mode)
+}
+
+fn set_permissions(path: &Path, mode: u32) -> Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|source| {
         Error::SetPermissions {
-            path: tmp_path.to_path_buf(),
+            path: path.to_path_buf(),
             source,
         }
     })
@@ -133,12 +147,7 @@ pub fn ensure_dir(path: &Path, mode: u32) -> Result<()> {
         path: path.to_path_buf(),
         source,
     })?;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|source| {
-        Error::SetPermissions {
-            path: path.to_path_buf(),
-            source,
-        }
-    })
+    set_permissions(path, mode)
 }
 
 /// Returns true if `name` matches the `{file_name}.tmp.{pid}.{nonce}` convention,
