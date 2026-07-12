@@ -245,6 +245,10 @@ mod tests {
         entries
     }
 
+    fn assert_no_stale_tmp_files(dir: &Path) {
+        assert_eq!(tmp_like_entries(dir), Vec::<PathBuf>::new());
+    }
+
     #[rstest]
     fn write_bytes_creates_target_and_leaves_no_tmp_file(dir: TempDir) {
         let target = dir.path().join("settings.json");
@@ -252,7 +256,7 @@ mod tests {
         write_bytes(&target, b"hello", 0o600).unwrap();
 
         assert_eq!(fs::read(&target).unwrap(), b"hello");
-        assert_eq!(tmp_like_entries(dir.path()), Vec::<PathBuf>::new());
+        assert_no_stale_tmp_files(dir.path());
     }
 
     #[rstest]
@@ -266,7 +270,7 @@ mod tests {
             serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
         assert_eq!(written, value);
         assert_eq!(mode_of(&target), 0o600);
-        assert_eq!(tmp_like_entries(dir.path()), Vec::<PathBuf>::new());
+        assert_no_stale_tmp_files(dir.path());
     }
 
     #[rstest]
@@ -279,7 +283,7 @@ mod tests {
 
         assert!(matches!(err, Error::Rename { .. }));
         assert!(fs::metadata(&target).unwrap().is_dir());
-        assert_eq!(tmp_like_entries(dir.path()), Vec::<PathBuf>::new());
+        assert_no_stale_tmp_files(dir.path());
     }
 
     #[rstest]
@@ -294,7 +298,7 @@ mod tests {
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
         assert!(matches!(result, Err(Error::CreateTempFile { .. })));
         assert_eq!(fs::read(&target).unwrap(), b"original content");
-        assert_eq!(tmp_like_entries(dir.path()), Vec::<PathBuf>::new());
+        assert_no_stale_tmp_files(dir.path());
     }
 
     #[rstest]
