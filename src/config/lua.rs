@@ -20,11 +20,12 @@ impl Runtime {
         let config_dir = config_dir
             .to_str()
             .ok_or_else(|| mlua::Error::runtime("config_dir must be valid UTF-8"))?;
-        if config_dir.contains(';') {
-            // `;` is the package.path template separator (Lua 5.4 manual §6.3),
-            // so a literal `;` in the directory name would corrupt the path.
+        if config_dir.contains(';') || config_dir.contains('?') {
+            // `;` separates package.path templates and `?` is the placeholder substituted
+            // with the module name (Lua 5.4 manual §6.3), so either character in the
+            // directory name would corrupt path resolution.
             return Err(mlua::Error::runtime(
-                "config_dir must not contain ';' (Lua package.path separator)",
+                "config_dir must not contain ';' or '?' (Lua package.path special characters)",
             ));
         }
 
@@ -91,14 +92,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_new_rejects_semicolon_in_config_dir(config_dir: TempDir) {
-        let config_dir = config_dir.path().join("foo;bar");
+    #[case::semicolon(';')]
+    #[case::question_mark('?')]
+    fn test_new_rejects_special_characters_in_config_dir(
+        config_dir: TempDir,
+        #[case] special_char: char,
+    ) {
+        let config_dir = config_dir.path().join(format!("foo{special_char}bar"));
 
         let err = Runtime::new(&config_dir).unwrap_err();
 
         assert_eq!(
             err.to_string(),
-            "runtime error: config_dir must not contain ';' (Lua package.path separator)"
+            "runtime error: config_dir must not contain ';' or '?' (Lua package.path special characters)"
         );
     }
 
