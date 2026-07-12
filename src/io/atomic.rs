@@ -1,9 +1,10 @@
-//! Atomic file writes (tmp + fsync + rename) and stale-tmp-file detection.
+//! Atomic file writes (tmp + fsync + rename), directory creation with
+//! explicit permissions, and stale-tmp-file detection.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "not wired into the CLI yet; consumed by target::* / state::store in a later task"
+        reason = "public API surface of this I/O module; not every function has a caller yet"
     )
 )]
 
