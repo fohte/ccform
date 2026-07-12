@@ -4,8 +4,12 @@ use xdg::BaseDirectories;
 
 const APP_NAME: &str = "ccform";
 
-/// All absolute paths ccform resolves, bundled so callers only pay for one
-/// `$HOME` / XDG lookup regardless of how many paths they end up using.
+/// All absolute paths ccform resolves, computed together from a single
+/// `BaseDirectories` + `$HOME` pair by `resolve()`. Each public accessor
+/// below (`config_dir()`, `entry_path()`, ...) still calls `resolved()` — and
+/// thus re-reads env — independently per call; that's cheap enough for a CLI
+/// invoked once per command, so this struct exists to give `resolve()` a
+/// single return value rather than to cache lookups across accessor calls.
 #[cfg_attr(test, derive(Debug, PartialEq))]
 struct Resolved {
     config_dir: PathBuf,
@@ -41,6 +45,11 @@ fn resolved() -> Resolved {
     resolve(&BaseDirectories::with_prefix(APP_NAME), &home_dir())
 }
 
+/// Reads `$HOME` (or the OS user database if unset). Falls back to an empty
+/// path when neither is available — `xdg::BaseDirectories` guarantees the
+/// same for `get_config_home()`/`get_state_home()` — which degrades
+/// `entry_path()`/`settings_path()`/etc. to cwd-relative paths instead of
+/// erroring, since this module's public functions are infallible by design.
 fn home_dir() -> PathBuf {
     std::env::home_dir().unwrap_or_default()
 }
@@ -94,10 +103,10 @@ mod tests {
     /// already-owned value (both fields are `pub`), so we build one for real
     /// via `with_prefix` (to get `user_prefix` set correctly) and then
     /// overwrite just the two fields under test.
-    fn fake_dirs(config_home: PathBuf, state_home: PathBuf) -> BaseDirectories {
+    fn fake_dirs(config_home: Option<PathBuf>, state_home: Option<PathBuf>) -> BaseDirectories {
         let mut dirs = BaseDirectories::with_prefix(APP_NAME);
-        dirs.config_home = Some(config_home);
-        dirs.state_home = Some(state_home);
+        dirs.config_home = config_home;
+        dirs.state_home = state_home;
         dirs
     }
 
@@ -105,38 +114,44 @@ mod tests {
     // XDG_CONFIG_HOME / XDG_STATE_HOME both set to explicit values.
     #[case::xdg_vars_set(
         PathBuf::from("/fake/home"),
-        PathBuf::from("/fake/xdg-config"),
-        PathBuf::from("/fake/xdg-state")
+        Some(PathBuf::from("/fake/xdg-config")),
+        Some(PathBuf::from("/fake/xdg-state"))
     )]
     // Both unset: BaseDirectories itself falls back to $HOME/.config and
-    // $HOME/.local/state (verified by the `xdg` crate's own test suite), so
-    // "unset" is modeled here as that already-resolved fallback value.
+    // $HOME/.local/state (fallback logic: xdg-3.0.0/src/base_directories.rs
+    // `with_env_impl`, lines 308-316), so "unset" is modeled here as that
+    // already-resolved fallback value.
     #[case::xdg_vars_unset(
         PathBuf::from("/fake/home"),
-        PathBuf::from("/fake/home/.config"),
-        PathBuf::from("/fake/home/.local/state")
+        Some(PathBuf::from("/fake/home/.config")),
+        Some(PathBuf::from("/fake/home/.local/state"))
     )]
     // Only XDG_CONFIG_HOME set; XDG_STATE_HOME falls back independently.
     #[case::config_set_state_unset(
         PathBuf::from("/fake/home"),
-        PathBuf::from("/fake/xdg-config"),
-        PathBuf::from("/fake/home/.local/state")
+        Some(PathBuf::from("/fake/xdg-config")),
+        Some(PathBuf::from("/fake/home/.local/state"))
     )]
     // HOME swapped to a different tree entirely, XDG vars unset.
     #[case::home_overridden(
         PathBuf::from("/tmp/ccform-test-home"),
-        PathBuf::from("/tmp/ccform-test-home/.config"),
-        PathBuf::from("/tmp/ccform-test-home/.local/state")
+        Some(PathBuf::from("/tmp/ccform-test-home/.config")),
+        Some(PathBuf::from("/tmp/ccform-test-home/.local/state"))
     )]
+    // $HOME entirely unresolvable: `get_config_home()`/`get_state_home()`
+    // only return `None` in this case, and `home_dir()` degrades to an empty
+    // path too, so every path collapses to a cwd-relative one (documented on
+    // `home_dir()`).
+    #[case::home_unresolvable(PathBuf::new(), None, None)]
     fn test_resolve_builds_all_paths_from_config(
         #[case] home: PathBuf,
-        #[case] config_home: PathBuf,
-        #[case] state_home: PathBuf,
+        #[case] config_home: Option<PathBuf>,
+        #[case] state_home: Option<PathBuf>,
     ) {
         let dirs = fake_dirs(config_home.clone(), state_home.clone());
 
-        let config_dir = config_home.join(APP_NAME);
-        let state_dir = state_home.join(APP_NAME);
+        let config_dir = config_home.map_or_else(PathBuf::new, |p| p.join(APP_NAME));
+        let state_dir = state_home.map_or_else(PathBuf::new, |p| p.join(APP_NAME));
 
         assert_eq!(
             resolve(&dirs, &home),
