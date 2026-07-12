@@ -119,11 +119,20 @@ pub fn write_bytes(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
         }
     })?;
 
-    // rename(2) is atomic, but the directory entry it updates is not synced
-    // to disk with it: without this, a crash right after a successful
-    // rename can still resurrect the old file on remount.
-    let Some(parent) = path.parent() else {
-        return Ok(());
+    sync_parent_dir(path)
+}
+
+// rename(2) is atomic, but the directory entry it updates is not synced to
+// disk with it: without this, a crash right after a successful rename can
+// still resurrect the old file on remount.
+fn sync_parent_dir(path: &Path) -> Result<()> {
+    // `path.parent()` is `Some("")` for a relative path with no directory
+    // component (e.g. "settings.json"), and `File::open` rejects an empty
+    // path, so treat that case as the current directory.
+    let parent = match path.parent() {
+        Some(p) if p.as_os_str().is_empty() => Path::new("."),
+        Some(p) => p,
+        None => return Ok(()),
     };
     File::open(parent)
         .and_then(|dir| dir.sync_all())
@@ -284,6 +293,14 @@ mod tests {
         assert!(matches!(err, Error::Rename { .. }));
         assert!(fs::metadata(&target).unwrap().is_dir());
         assert_no_stale_tmp_files(dir.path());
+    }
+
+    #[rstest]
+    fn sync_parent_dir_defaults_empty_parent_to_current_dir() {
+        // `Path::new("settings.json").parent()` is `Some("")`, which
+        // `File::open` rejects with `NotFound` unless the empty parent is
+        // treated as the current directory.
+        assert!(sync_parent_dir(Path::new("settings.json")).is_ok());
     }
 
     #[rstest]
