@@ -1,6 +1,11 @@
 use std::path::Path;
 
-use mlua::{Lua, Result as LuaResult, Table};
+use mlua::{Lua, Result as LuaResult, Table, Value as LuaValue};
+
+/// A value wrapped by `ccform.replace`, marking it to fully replace the
+/// corresponding position during `ccform.merge` instead of being deep-merged.
+/// Opaque from Lua; only unwrapped by the merge implementation.
+pub struct Replace(pub LuaValue);
 
 /// Hosts the Lua 5.4 VM used to evaluate a user's `ccform.lua` DSL.
 #[derive(Debug)]
@@ -14,10 +19,11 @@ pub struct Runtime {
 
 impl Runtime {
     /// Creates a Lua VM with the `ccform` global registered (including
-    /// `ccform.env`, which reads process environment variables) and
-    /// `require` wired up to resolve modules under `config_dir` (as
-    /// `?.lua` and `?/init.lua`), ahead of the default `package.path`
-    /// entries.
+    /// `ccform.env`, which reads process environment variables, and
+    /// `ccform.replace`, which wraps a value as a full-replace marker for
+    /// `ccform.merge`) and `require` wired up to resolve modules under
+    /// `config_dir` (as `?.lua` and `?/init.lua`), ahead of the default
+    /// `package.path` entries.
     pub fn new(config_dir: &Path) -> LuaResult<Self> {
         let config_dir = config_dir
             .to_str()
@@ -39,6 +45,10 @@ impl Runtime {
             // `.ok()` also maps a non-UTF-8 value (VarError::NotUnicode) to `nil`,
             // indistinguishable from an unset variable.
             lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
+        )?;
+        ccform.set(
+            "replace",
+            lua.create_function(|lua, value: LuaValue| lua.create_any_userdata(Replace(value)))?,
         )?;
         lua.globals().set("ccform", ccform)?;
 
@@ -65,29 +75,31 @@ mod tests {
         tempfile::tempdir().unwrap()
     }
 
-    #[rstest]
-    fn test_ccform_global_is_accessible_without_require(config_dir: TempDir) {
-        let runtime = Runtime::new(config_dir.path()).unwrap();
+    #[fixture]
+    fn runtime(config_dir: TempDir) -> Runtime {
+        Runtime::new(config_dir.path()).unwrap()
+    }
 
+    #[rstest]
+    fn test_ccform_global_is_accessible_without_require(runtime: Runtime) {
         let ccform: mlua::Table = runtime.lua.load("return ccform").eval().unwrap();
-        let keys: Vec<String> = ccform
+        let mut keys: Vec<String> = ccform
             .pairs::<String, mlua::Value>()
             .map(|pair| pair.unwrap().0)
             .collect();
+        keys.sort();
 
-        assert_eq!(keys, vec!["env".to_string()]);
+        assert_eq!(keys, vec!["env".to_string(), "replace".to_string()]);
     }
 
     #[rstest]
     #[case::defined("CARGO_PKG_NAME", Some(env!("CARGO_PKG_NAME")))]
     #[case::undefined("CCFORM_TEST_ENV_UNDEFINED_VAR", None)]
     fn test_env_reflects_process_environment(
-        config_dir: TempDir,
+        runtime: Runtime,
         #[case] var_name: &str,
         #[case] expected: Option<&str>,
     ) {
-        let runtime = Runtime::new(config_dir.path()).unwrap();
-
         let result: Option<String> = runtime
             .lua
             .load(format!("return ccform.env('{var_name}')"))
@@ -95,6 +107,53 @@ mod tests {
             .unwrap();
 
         assert_eq!(result, expected.map(String::from));
+    }
+
+    #[rstest]
+    #[case::number("42")]
+    #[case::string("'hello'")]
+    #[case::boolean("true")]
+    #[case::table("{1, 2, 3}")]
+    fn test_replace_returns_opaque_userdata(runtime: Runtime, #[case] literal: &str) {
+        let lua_type: String = runtime
+            .lua
+            .load(format!("return type(ccform.replace({literal}))"))
+            .eval()
+            .unwrap();
+
+        assert_eq!(lua_type, "userdata");
+    }
+
+    #[rstest]
+    #[case::number("42")]
+    #[case::string("'hello'")]
+    #[case::boolean("true")]
+    fn test_replace_preserves_wrapped_scalar(runtime: Runtime, #[case] literal: &str) {
+        let userdata: mlua::AnyUserData = runtime
+            .lua
+            .load(format!("return ccform.replace({literal})"))
+            .eval()
+            .unwrap();
+        let expected: mlua::Value = runtime.lua.load(literal).eval().unwrap();
+
+        assert_eq!(userdata.borrow::<Replace>().unwrap().0, expected);
+    }
+
+    #[rstest]
+    fn test_replace_preserves_wrapped_table_contents(runtime: Runtime) {
+        let userdata: mlua::AnyUserData = runtime
+            .lua
+            .load("return ccform.replace({1, 2, 3})")
+            .eval()
+            .unwrap();
+        let wrapped = userdata.borrow::<Replace>().unwrap();
+        let table = match &wrapped.0 {
+            LuaValue::Table(table) => table,
+            other => panic!("expected LuaValue::Table, got {other:?}"),
+        };
+        let values: Vec<i64> = table.sequence_values().map(|v| v.unwrap()).collect();
+
+        assert_eq!(values, vec![1, 2, 3]);
     }
 
     #[rstest]
