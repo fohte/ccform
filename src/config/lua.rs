@@ -36,6 +36,8 @@ impl Runtime {
         let ccform = lua.create_table()?;
         ccform.set(
             "env",
+            // `.ok()` also maps a non-UTF-8 value (VarError::NotUnicode) to `nil`,
+            // indistinguishable from an unset variable.
             lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
         )?;
         lua.globals().set("ccform", ccform)?;
@@ -67,9 +69,13 @@ mod tests {
     fn test_ccform_global_is_accessible_without_require(config_dir: TempDir) {
         let runtime = Runtime::new(config_dir.path()).unwrap();
 
-        let ccform: mlua::Value = runtime.lua.load("return ccform").eval().unwrap();
+        let ccform: mlua::Table = runtime.lua.load("return ccform").eval().unwrap();
+        let keys: Vec<String> = ccform
+            .pairs::<String, mlua::Value>()
+            .map(|pair| pair.unwrap().0)
+            .collect();
 
-        assert!(matches!(ccform, mlua::Value::Table(_)));
+        assert_eq!(keys, vec!["env".to_string()]);
     }
 
     #[rstest]
