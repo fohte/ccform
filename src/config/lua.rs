@@ -13,9 +13,11 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Creates a Lua VM with the `ccform` global registered and `require`
-    /// wired up to resolve modules under `config_dir` (as `?.lua` and
-    /// `?/init.lua`), ahead of the default `package.path` entries.
+    /// Creates a Lua VM with the `ccform` global registered (including
+    /// `ccform.env`, which reads process environment variables) and
+    /// `require` wired up to resolve modules under `config_dir` (as
+    /// `?.lua` and `?/init.lua`), ahead of the default `package.path`
+    /// entries.
     pub fn new(config_dir: &Path) -> LuaResult<Self> {
         let config_dir = config_dir
             .to_str()
@@ -31,7 +33,12 @@ impl Runtime {
 
         let lua = Lua::new();
 
-        lua.globals().set("ccform", lua.create_table()?)?;
+        let ccform = lua.create_table()?;
+        ccform.set(
+            "env",
+            lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
+        )?;
+        lua.globals().set("ccform", ccform)?;
 
         let package: Table = lua.globals().get("package")?;
         let default_path: String = package.get("path")?;
@@ -46,7 +53,6 @@ impl Runtime {
 
 #[cfg(test)]
 mod tests {
-    use mlua::LuaSerdeExt;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
@@ -62,9 +68,27 @@ mod tests {
         let runtime = Runtime::new(config_dir.path()).unwrap();
 
         let ccform: mlua::Value = runtime.lua.load("return ccform").eval().unwrap();
-        let result: serde_json::Value = runtime.lua.from_value(ccform).unwrap();
 
-        assert_eq!(result, serde_json::json!({}));
+        assert!(matches!(ccform, mlua::Value::Table(_)));
+    }
+
+    #[rstest]
+    #[case::defined("CARGO_PKG_NAME", Some(env!("CARGO_PKG_NAME")))]
+    #[case::undefined("CCFORM_TEST_ENV_UNDEFINED_VAR", None)]
+    fn test_env_reflects_process_environment(
+        config_dir: TempDir,
+        #[case] var_name: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        let runtime = Runtime::new(config_dir.path()).unwrap();
+
+        let result: Option<String> = runtime
+            .lua
+            .load(format!("return ccform.env('{var_name}')"))
+            .eval()
+            .unwrap();
+
+        assert_eq!(result, expected.map(String::from));
     }
 
     #[rstest]
