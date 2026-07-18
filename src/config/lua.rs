@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use mlua::{Lua, Result as LuaResult, Table, Value as LuaValue, Variadic};
+use mlua::{Lua, Result as LuaResult, Table, Value as LuaValue};
 
 use crate::config::merge::deep_merge;
 
@@ -53,10 +53,7 @@ impl Runtime {
             "replace",
             lua.create_function(|lua, value: LuaValue| lua.create_any_userdata(Replace(value)))?,
         )?;
-        ccform.set(
-            "merge",
-            lua.create_function(|lua, values: Variadic<LuaValue>| deep_merge(lua, values))?,
-        )?;
+        ccform.set("merge", lua.create_function(deep_merge)?)?;
         lua.globals().set("ccform", ccform)?;
 
         let package: Table = lua.globals().get("package")?;

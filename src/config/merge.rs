@@ -9,7 +9,11 @@ use crate::config::lua::Replace;
 /// by `ccform.replace` fully replaces whatever occupies its position instead
 /// of being merged or concatenated, no matter how deep it is nested. Zero
 /// arguments yields an empty table; the result never contains a `Replace`
-/// marker, however deep the input nesting.
+/// marker, however deep the input nesting. Traverses table contents
+/// recursively with no cycle detection, so a self-referential table (e.g.
+/// `t.self = t`) overflows the stack rather than returning an error — the
+/// same trade-off a `ccform.lua` author accepts by writing an infinite Lua
+/// loop in their own config.
 pub fn deep_merge(lua: &Lua, values: Variadic<LuaValue>) -> LuaResult<LuaValue> {
     let mut acc: Option<LuaValue> = None;
     for value in values {
@@ -26,16 +30,19 @@ pub fn deep_merge(lua: &Lua, values: Variadic<LuaValue>) -> LuaResult<LuaValue> 
 /// a previous merge step); only `right` is inspected for one.
 fn merge_value(lua: &Lua, left: Option<LuaValue>, right: LuaValue) -> LuaResult<LuaValue> {
     match (left, right) {
-        (Some(LuaValue::Table(left_table)), LuaValue::Table(right_table)) => {
-            if is_array(&left_table)? && is_array(&right_table)? {
-                concat_arrays(lua, &left_table, &right_table)
-            } else {
-                merge_maps(lua, &left_table, &right_table)
-            }
+        (Some(LuaValue::Table(left_table)), LuaValue::Table(right_table))
+            if is_array(&left_table)? && is_array(&right_table)? =>
+        {
+            concat_arrays(lua, &left_table, &right_table)
         }
-        // No table on both sides to merge/concat: `right` wins outright,
-        // whether because there is nothing on the left, or because a scalar
-        // and a table (or two scalars) can't be merged with each other.
+        (Some(LuaValue::Table(left_table)), LuaValue::Table(right_table))
+            if !is_array(&left_table)? && !is_array(&right_table)? =>
+        {
+            merge_maps(lua, &left_table, &right_table)
+        }
+        // Either there is nothing on the left, both sides are scalars, or the
+        // two tables disagree on shape (one is an array, the other a map):
+        // none of these have a sensible merge/concat, so `right` wins outright.
         (_, right) => resolve(lua, right),
     }
 }
@@ -177,36 +184,38 @@ mod tests {
     }
 
     #[rstest]
-    fn test_deep_merge_recursively_merges_maps_with_right_precedence(lua: Lua) {
-        let left: LuaValue = lua.load("{a = 1, b = {x = 1, y = 2}}").eval().unwrap();
-        let right: LuaValue = lua.load("{b = {y = 3, z = 4}, c = 5}").eval().unwrap();
+    #[case::merges_maps_with_right_precedence(
+        "{a = 1, b = {x = 1, y = 2}}",
+        "{b = {y = 3, z = 4}, c = 5}",
+        json!({"a": 1, "b": {"x": 1, "y": 3, "z": 4}, "c": 5})
+    )]
+    #[case::concatenates_sequential_integer_arrays(
+        "{1, 2, 3}",
+        "{4, 5}",
+        json!([1, 2, 3, 4, 5])
+    )]
+    #[case::replaces_scalars_with_the_right_side(
+        "{value = 1}",
+        "{value = 'two'}",
+        json!({"value": "two"})
+    )]
+    #[case::replaces_outright_on_array_map_shape_mismatch(
+        "{1, 2, 3}",
+        "{x = 'override'}",
+        json!({"x": "override"})
+    )]
+    fn test_deep_merge_default_semantics(
+        lua: Lua,
+        #[case] left_src: &str,
+        #[case] right_src: &str,
+        #[case] expected: JsonValue,
+    ) {
+        let left: LuaValue = lua.load(left_src).eval().unwrap();
+        let right: LuaValue = lua.load(right_src).eval().unwrap();
 
         let result = deep_merge(&lua, Variadic::from_iter([left, right])).unwrap();
 
-        assert_eq!(
-            to_json(&lua, result),
-            json!({"a": 1, "b": {"x": 1, "y": 3, "z": 4}, "c": 5}),
-        );
-    }
-
-    #[rstest]
-    fn test_deep_merge_concatenates_sequential_integer_arrays(lua: Lua) {
-        let left: LuaValue = lua.load("{1, 2, 3}").eval().unwrap();
-        let right: LuaValue = lua.load("{4, 5}").eval().unwrap();
-
-        let result = deep_merge(&lua, Variadic::from_iter([left, right])).unwrap();
-
-        assert_eq!(to_json(&lua, result), json!([1, 2, 3, 4, 5]));
-    }
-
-    #[rstest]
-    fn test_deep_merge_replaces_scalars_with_the_right_side(lua: Lua) {
-        let left: LuaValue = lua.load("{value = 1}").eval().unwrap();
-        let right: LuaValue = lua.load("{value = 'two'}").eval().unwrap();
-
-        let result = deep_merge(&lua, Variadic::from_iter([left, right])).unwrap();
-
-        assert_eq!(to_json(&lua, result), json!({"value": "two"}));
+        assert_eq!(to_json(&lua, result), expected);
     }
 
     #[rstest]
