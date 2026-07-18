@@ -2,6 +2,8 @@ use std::path::Path;
 
 use mlua::{Lua, Result as LuaResult, Table, Value as LuaValue};
 
+use crate::config::merge::deep_merge;
+
 /// A value wrapped by `ccform.replace`, marking it to fully replace the
 /// corresponding position during `ccform.merge` instead of being deep-merged.
 /// Opaque from Lua; only unwrapped by the merge implementation.
@@ -19,11 +21,12 @@ pub struct Runtime {
 
 impl Runtime {
     /// Creates a Lua VM with the `ccform` global registered (including
-    /// `ccform.env`, which reads process environment variables, and
+    /// `ccform.env`, which reads process environment variables;
     /// `ccform.replace`, which wraps a value as a full-replace marker for
-    /// `ccform.merge`) and `require` wired up to resolve modules under
-    /// `config_dir` (as `?.lua` and `?/init.lua`), ahead of the default
-    /// `package.path` entries.
+    /// `ccform.merge`; and `ccform.merge`, which deep-merges any number of
+    /// tables) and `require` wired up to resolve modules under `config_dir`
+    /// (as `?.lua` and `?/init.lua`), ahead of the default `package.path`
+    /// entries.
     pub fn new(config_dir: &Path) -> LuaResult<Self> {
         let config_dir = config_dir
             .to_str()
@@ -50,6 +53,7 @@ impl Runtime {
             "replace",
             lua.create_function(|lua, value: LuaValue| lua.create_any_userdata(Replace(value)))?,
         )?;
+        ccform.set("merge", lua.create_function(deep_merge)?)?;
         lua.globals().set("ccform", ccform)?;
 
         let package: Table = lua.globals().get("package")?;
@@ -65,6 +69,7 @@ impl Runtime {
 
 #[cfg(test)]
 mod tests {
+    use mlua::LuaSerdeExt;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
@@ -89,7 +94,14 @@ mod tests {
             .collect();
         keys.sort();
 
-        assert_eq!(keys, vec!["env".to_string(), "replace".to_string()]);
+        assert_eq!(
+            keys,
+            vec![
+                "env".to_string(),
+                "merge".to_string(),
+                "replace".to_string()
+            ]
+        );
     }
 
     #[rstest]
@@ -139,6 +151,18 @@ mod tests {
         let values: Vec<i64> = table.sequence_values().map(|v| v.unwrap()).collect();
 
         assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[rstest]
+    fn test_merge_is_reachable_via_the_ccform_global(runtime: Runtime) {
+        let result: mlua::Value = runtime
+            .lua
+            .load("return ccform.merge({a = 1}, {b = 2})")
+            .eval()
+            .unwrap();
+        let json: serde_json::Value = runtime.lua.from_value(result).unwrap();
+
+        assert_eq!(json, serde_json::json!({"a": 1, "b": 2}));
     }
 
     #[rstest]
