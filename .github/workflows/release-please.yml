@@ -120,6 +120,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      TAG_NAME: ${{ inputs.tag_name || needs.release-please.outputs.tag_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -127,14 +129,14 @@ jobs:
         id: octo-sts
         with:
           scope: fohte
-          identity: ccform-publish-homebrew
+          identity: ${{ github.event.repository.name }}-publish-homebrew
           domain: octo-sts.fohte.net
 
       - name: Generate Homebrew formula
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ inputs.tag_name || needs.release-please.outputs.tag_name }}
         run: |
+          set -euo pipefail
           version="${TAG_NAME#v}"
 
           sha256_macos_arm64=$(gh release download "$TAG_NAME" --pattern 'ccform-aarch64-apple-darwin.tar.gz' --output - | sha256sum | cut -d ' ' -f 1)
@@ -151,8 +153,8 @@ jobs:
       - name: Push formula to homebrew-tap
         env:
           GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
-          TAG_NAME: ${{ inputs.tag_name || needs.release-please.outputs.tag_name }}
         run: |
+          set -euo pipefail
           version="${TAG_NAME#v}"
 
           git clone https://github.com/fohte/homebrew-tap.git homebrew-tap
