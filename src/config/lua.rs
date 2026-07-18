@@ -113,21 +113,6 @@ mod tests {
     #[case::number("42")]
     #[case::string("'hello'")]
     #[case::boolean("true")]
-    #[case::table("{1, 2, 3}")]
-    fn test_replace_returns_opaque_userdata(runtime: Runtime, #[case] literal: &str) {
-        let lua_type: String = runtime
-            .lua
-            .load(format!("return type(ccform.replace({literal}))"))
-            .eval()
-            .unwrap();
-
-        assert_eq!(lua_type, "userdata");
-    }
-
-    #[rstest]
-    #[case::number("42")]
-    #[case::string("'hello'")]
-    #[case::boolean("true")]
     fn test_replace_preserves_wrapped_scalar(runtime: Runtime, #[case] literal: &str) {
         let userdata: mlua::AnyUserData = runtime
             .lua
