@@ -125,7 +125,7 @@ fn concat_arrays(lua: &Lua, left: &Table, right: &Table) -> LuaResult<LuaValue> 
 /// A table is an array when it has a positive length and every key is a
 /// sequential integer from `1` to that length; an empty table is treated as
 /// a map, since there is no way to distinguish it from an empty array.
-fn is_array(table: &Table) -> LuaResult<bool> {
+pub(crate) fn is_array(table: &Table) -> LuaResult<bool> {
     let len = table.raw_len();
     if len == 0 {
         return Ok(false);
