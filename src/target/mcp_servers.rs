@@ -62,6 +62,14 @@ impl McpServers {
     /// Replaces the `mcpServers` key with `desired`, preserving every other
     /// key and the file's existing key order. Creates the file with just
     /// `{"mcpServers": desired}` if it does not exist yet.
+    ///
+    /// This is a read-modify-write with no exclusive lock across the two
+    /// steps: a concurrent write to `~/.claude.json` by Claude Code itself
+    /// (e.g. an OAuth refresh) between the read and the rename here is not
+    /// detected and its other-key changes are overwritten. Only the rename
+    /// used to land this write is atomic, matching the crash-safety
+    /// guarantee `io::atomic::write_json` provides; it is not mutual
+    /// exclusion against other writers of the file.
     pub fn write(&self, desired: &Value) -> Result<()> {
         let mut root = read_object(&self.path)?;
         root.insert(KEY.to_string(), desired.clone());
@@ -187,28 +195,27 @@ mod tests {
     }
 
     #[rstest]
-    fn read_returns_null_when_file_missing(dir: tempfile::TempDir) {
-        let target = McpServers::new(dir.path().join(".claude.json"));
-
-        assert_eq!(target.read().unwrap(), Value::Null);
-    }
-
-    #[rstest]
-    fn read_returns_null_when_key_missing(dir: tempfile::TempDir) {
+    #[case::file_missing(None, Value::Null)]
+    #[case::key_missing(
+        Some(r#"{"oauthAccount": {"email": "user@example.com"}}"#),
+        Value::Null
+    )]
+    #[case::key_present(
+        Some(r#"{"mcpServers": {"a": 1}, "other": true}"#),
+        json!({"a": 1})
+    )]
+    fn read_returns_expected_value(
+        dir: tempfile::TempDir,
+        #[case] initial_content: Option<&str>,
+        #[case] expected: Value,
+    ) {
         let path = dir.path().join(".claude.json");
-        fs::write(&path, r#"{"oauthAccount": {"email": "user@example.com"}}"#).unwrap();
+        if let Some(content) = initial_content {
+            fs::write(&path, content).unwrap();
+        }
         let target = McpServers::new(path);
 
-        assert_eq!(target.read().unwrap(), Value::Null);
-    }
-
-    #[rstest]
-    fn read_returns_current_mcp_servers_value(dir: tempfile::TempDir) {
-        let path = dir.path().join(".claude.json");
-        fs::write(&path, r#"{"mcpServers": {"a": 1}, "other": true}"#).unwrap();
-        let target = McpServers::new(path);
-
-        assert_eq!(target.read().unwrap(), json!({"a": 1}));
+        assert_eq!(target.read().unwrap(), expected);
     }
 
     #[rstest]
