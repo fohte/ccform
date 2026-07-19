@@ -9,18 +9,22 @@ use serde_json::{Map, Number, Value as JsonValue};
 
 use crate::config::merge::is_array;
 
-/// Converts a Lua value to JSON. `nil`, booleans, numbers, and strings
-/// convert directly; a table converts to a JSON array when
+/// Converts a Lua value to JSON. `nil`, booleans, integers, finite floats,
+/// and strings convert directly; a table converts to a JSON array when
 /// `config::merge::is_array` considers it one (sequential integer keys
 /// starting at `1`; an empty table is a map), and to a JSON object
-/// otherwise. Any other Lua type (function, thread, userdata, ...) has no
-/// JSON representation and returns an error.
+/// otherwise. Any Lua value with no JSON representation — a non-finite
+/// float (NaN/infinity), a table with a non-string key, or a function,
+/// thread, userdata, etc. — returns an error rather than silently
+/// dropping or coercing data.
 pub fn lua_to_json(value: &LuaValue) -> LuaResult<JsonValue> {
     match value {
         LuaValue::Nil => Ok(JsonValue::Null),
         LuaValue::Boolean(b) => Ok(JsonValue::Bool(*b)),
         LuaValue::Integer(i) => Ok(JsonValue::Number((*i).into())),
-        LuaValue::Number(n) => Ok(Number::from_f64(*n).map_or(JsonValue::Null, JsonValue::Number)),
+        LuaValue::Number(n) => Number::from_f64(*n).map(JsonValue::Number).ok_or_else(|| {
+            mlua::Error::runtime(format!("cannot convert non-finite Lua number {n} to JSON"))
+        }),
         LuaValue::String(s) => Ok(JsonValue::String(s.to_str()?.to_string())),
         LuaValue::Table(table) => table_to_json(table),
         other => Err(mlua::Error::runtime(format!(
@@ -39,9 +43,15 @@ fn table_to_json(table: &Table) -> LuaResult<JsonValue> {
         Ok(JsonValue::Array(items))
     } else {
         let mut map = Map::new();
-        for pair in table.pairs::<String, LuaValue>() {
+        for pair in table.pairs::<LuaValue, LuaValue>() {
             let (key, value) = pair?;
-            map.insert(key, lua_to_json(&value)?);
+            let LuaValue::String(key) = key else {
+                return Err(mlua::Error::runtime(format!(
+                    "cannot convert Lua {} table key to a JSON object key: expected string",
+                    key.type_name()
+                )));
+            };
+            map.insert(key.to_str()?.to_string(), lua_to_json(&value)?);
         }
         Ok(JsonValue::Object(map))
     }
@@ -120,6 +130,27 @@ mod tests {
         let value: LuaValue = lua.load(literal).eval().unwrap();
 
         assert_eq!(lua_to_json(&value).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case::non_finite_number(
+        "0/0",
+        "runtime error: cannot convert non-finite Lua number NaN to JSON"
+    )]
+    #[case::table_with_a_non_string_key(
+        "{[1] = 'a', foo = 'bar'}",
+        "runtime error: cannot convert Lua integer table key to a JSON object key: expected string"
+    )]
+    fn test_lua_to_json_rejects_values_with_no_json_representation(
+        lua: Lua,
+        #[case] literal: &str,
+        #[case] expected_message: &str,
+    ) {
+        let value: LuaValue = lua.load(literal).eval().unwrap();
+
+        let err = lua_to_json(&value).unwrap_err();
+
+        assert_eq!(err.to_string(), expected_message);
     }
 
     #[rstest]
