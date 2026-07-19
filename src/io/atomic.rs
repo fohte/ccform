@@ -1,12 +1,5 @@
 //! Atomic file writes (tmp + fsync + rename), directory creation with
 //! explicit permissions, and stale-tmp-file detection.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "public API surface of this I/O module; not every function has a caller yet"
-    )
-)]
 
 use std::fs::{self, File};
 use std::io::{self, Write};
