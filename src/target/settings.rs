@@ -59,6 +59,9 @@ impl Settings {
     /// Writes `value` atomically via [`atomic::write_json`], sorting object
     /// keys alphabetically at every nesting level first so the file's key
     /// order is stable across writes regardless of the caller's key order.
+    /// Unlike `read`, this does not create a missing parent directory:
+    /// `~/.claude/` is expected to already exist, since Claude Code itself
+    /// creates it.
     pub fn write(&self, value: &Value) -> Result<()> {
         let mut sorted = value.clone();
         sort_keys(&mut sorted);
