@@ -115,6 +115,9 @@ fn diff_objects(
     }
 }
 
+/// Compares elements by index rather than by content, so inserting or
+/// reordering elements shows up as `Replace`s of every shifted index rather
+/// than as a single `Add`/`Remove` at the insertion point.
 fn diff_arrays(path: &str, before: &[Value], after: &[Value], out: &mut Vec<Change>) {
     let common = before.len().min(after.len());
     for (index, (before_value, after_value)) in
