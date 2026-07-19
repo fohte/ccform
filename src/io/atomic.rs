@@ -221,17 +221,9 @@ pub fn warn_stale_tmp_files(dir: &Path) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstest::{fixture, rstest};
+    use crate::test_support::{dir, mode_of};
+    use rstest::rstest;
     use tempfile::TempDir;
-
-    #[fixture]
-    fn dir() -> TempDir {
-        tempfile::tempdir().unwrap()
-    }
-
-    fn mode_of(path: &Path) -> u32 {
-        fs::metadata(path).unwrap().permissions().mode() & 0o777
-    }
 
     fn tmp_like_entries(dir: &Path) -> Vec<PathBuf> {
         let mut entries: Vec<PathBuf> = fs::read_dir(dir)

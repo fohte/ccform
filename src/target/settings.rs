@@ -92,20 +92,12 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
     use serde_json::json;
     use tempfile::TempDir;
 
     use super::*;
-
-    #[fixture]
-    fn dir() -> TempDir {
-        tempfile::tempdir().unwrap()
-    }
-
-    fn mode_of(path: &Path) -> u32 {
-        fs::metadata(path).unwrap().permissions().mode() & 0o777
-    }
+    use crate::test_support::{dir, mode_of};
 
     fn tmp_like_entries(dir: &Path) -> Vec<PathBuf> {
         let mut entries: Vec<PathBuf> = fs::read_dir(dir)
