@@ -61,35 +61,43 @@ fn write_string(out: &mut String, s: &str) {
 }
 
 fn write_array(out: &mut String, items: &[Value], depth: usize) {
-    if items.is_empty() {
-        out.push_str("{}");
-        return;
-    }
-
-    out.push_str("{\n");
-    for item in items {
-        out.push_str(&INDENT.repeat(depth + 1));
-        write_value(out, item, depth + 1);
-        out.push_str(",\n");
-    }
-    out.push_str(&INDENT.repeat(depth));
-    out.push('}');
+    write_braced(out, depth, items.is_empty(), |out| {
+        for item in items {
+            out.push_str(&INDENT.repeat(depth + 1));
+            write_value(out, item, depth + 1);
+            out.push_str(",\n");
+        }
+    });
 }
 
 fn write_object(out: &mut String, map: &Map<String, Value>, depth: usize) {
-    if map.is_empty() {
+    write_braced(out, depth, map.is_empty(), |out| {
+        for (key, value) in map {
+            out.push_str(&INDENT.repeat(depth + 1));
+            write_key(out, key);
+            out.push_str(" = ");
+            write_value(out, value, depth + 1);
+            out.push_str(",\n");
+        }
+    });
+}
+
+/// Shared shape behind `write_array`/`write_object`: an empty table
+/// collapses to `{}`, otherwise `write_items` fills the body between an
+/// opening `{\n` and a closing `}` indented back to `depth`.
+fn write_braced(
+    out: &mut String,
+    depth: usize,
+    is_empty: bool,
+    write_items: impl FnOnce(&mut String),
+) {
+    if is_empty {
         out.push_str("{}");
         return;
     }
 
     out.push_str("{\n");
-    for (key, value) in map {
-        out.push_str(&INDENT.repeat(depth + 1));
-        write_key(out, key);
-        out.push_str(" = ");
-        write_value(out, value, depth + 1);
-        out.push_str(",\n");
-    }
+    write_items(out);
     out.push_str(&INDENT.repeat(depth));
     out.push('}');
 }
