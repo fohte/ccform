@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 
 use mlua::{Lua, Result as LuaResult, Table, Value as LuaValue};
@@ -12,10 +13,6 @@ pub struct Replace(pub LuaValue);
 /// Hosts the Lua 5.4 VM used to evaluate a user's `ccform.lua` DSL.
 #[derive(Debug)]
 pub struct Runtime {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "consumed by Runtime::load_entry")
-    )]
     lua: Lua,
 }
 
@@ -64,6 +61,23 @@ impl Runtime {
         )?;
 
         Ok(Self { lua })
+    }
+
+    /// Reads `path` and evaluates it as a Lua chunk, returning its return
+    /// value as-is (no validation of its shape). Lua syntax and runtime
+    /// errors propagate as `mlua::Error`, named after `path` so any position
+    /// info in the error refers to it.
+    pub fn load_entry(&self, path: &Path) -> LuaResult<LuaValue> {
+        let source = fs::read_to_string(path).map_err(|err| {
+            mlua::Error::runtime(format!("failed to read {}: {err}", path.display()))
+        })?;
+        self.lua
+            .load(source)
+            // The `@` prefix marks the chunk name as a file path (mlua's own
+            // `AsChunk for &Path` impl does the same), so Lua reports error
+            // positions as `path:line:` instead of `[string "path"]:line:`.
+            .set_name(format!("@{}", path.display()))
+            .eval()
     }
 }
 
@@ -204,6 +218,39 @@ mod tests {
             err.to_string(),
             "runtime error: config_dir must not contain ';' or '?' (Lua package.path special characters)"
         );
+    }
+
+    #[rstest]
+    fn test_load_entry_returns_the_chunks_return_value(config_dir: TempDir) {
+        let entry_path = config_dir.path().join("ccform.lua");
+        std::fs::write(&entry_path, "return { a = 1 }").unwrap();
+        let runtime = Runtime::new(config_dir.path()).unwrap();
+
+        let value = runtime.load_entry(&entry_path).unwrap();
+
+        let json: serde_json::Value = runtime.lua.from_value(value).unwrap();
+        assert_eq!(json, serde_json::json!({"a": 1}));
+    }
+
+    #[rstest]
+    fn test_load_entry_propagates_lua_syntax_errors(config_dir: TempDir) {
+        let entry_path = config_dir.path().join("ccform.lua");
+        std::fs::write(&entry_path, "return {").unwrap();
+        let runtime = Runtime::new(config_dir.path()).unwrap();
+
+        let err = runtime.load_entry(&entry_path).unwrap_err();
+
+        assert!(matches!(err, mlua::Error::SyntaxError { .. }));
+    }
+
+    #[rstest]
+    fn test_load_entry_reports_a_missing_file(config_dir: TempDir) {
+        let entry_path = config_dir.path().join("ccform.lua");
+        let runtime = Runtime::new(config_dir.path()).unwrap();
+
+        let err = runtime.load_entry(&entry_path).unwrap_err();
+
+        assert!(matches!(err, mlua::Error::RuntimeError(_)));
     }
 
     #[cfg(unix)]
