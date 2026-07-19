@@ -49,11 +49,7 @@ pub fn partition_root(lua: &Lua, root: Table) -> LuaResult<(Desired, Meta)> {
 
     let settings: Option<Table> = root.get("settings")?;
     let mcp_servers: Option<Table> = root.get("mcpServers")?;
-    let meta_table: Option<Table> = root.get("ccform")?;
-    let auto_import = match &meta_table {
-        Some(table) => table.get::<Option<bool>>("autoImport")?.unwrap_or(true),
-        None => true,
-    };
+    let auto_import = auto_import_enabled(&root)?;
 
     Ok((
         Desired {
@@ -62,6 +58,17 @@ pub fn partition_root(lua: &Lua, root: Table) -> LuaResult<(Desired, Meta)> {
         },
         Meta { auto_import },
     ))
+}
+
+/// Whether `root`'s `ccform` meta table permits `import.lua` to be
+/// automatically merged in ahead of it: true unless `ccform.autoImport` is
+/// present and explicitly `false`.
+pub(crate) fn auto_import_enabled(root: &Table) -> LuaResult<bool> {
+    let meta_table: Option<Table> = root.get("ccform")?;
+    Ok(match &meta_table {
+        Some(table) => table.get::<Option<bool>>("autoImport")?.unwrap_or(true),
+        None => true,
+    })
 }
 
 /// Returns the top-level keys of `root` outside `RECOGNIZED_KEYS`.
