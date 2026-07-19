@@ -133,71 +133,53 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_to_lua_literal_renders_nested_object() {
-        let value = json!({
+    #[rstest]
+    #[case::nested_object(
+        json!({
             "settings": {
                 "permissions": {
                     "allow": ["Bash(brew:*)"],
                 },
             },
-        });
-
-        assert_eq!(
-            to_lua_literal(&value, None),
-            indoc! {"
-                return {
-                  settings = {
-                    permissions = {
-                      allow = {
-                        'Bash(brew:*)',
-                      },
-                    },
+        }),
+        indoc! {"
+            return {
+              settings = {
+                permissions = {
+                  allow = {
+                    'Bash(brew:*)',
                   },
-                }
-            "}
-        );
-    }
-
-    #[test]
-    fn test_to_lua_literal_quotes_non_identifier_keys() {
-        let value = json!({
+                },
+              },
+            }
+        "}
+    )]
+    #[case::non_identifier_keys(
+        json!({
             "foo-bar": 1,
             "1leading": 2,
             "end": 3,
             "valid_key": 4,
-        });
-
-        assert_eq!(
-            to_lua_literal(&value, None),
-            indoc! {"
-                return {
-                  ['foo-bar'] = 1,
-                  ['1leading'] = 2,
-                  ['end'] = 3,
-                  valid_key = 4,
-                }
-            "}
-        );
-    }
-
-    #[test]
-    fn test_to_lua_literal_escapes_special_characters_in_strings() {
-        let value = json!({"value": "back\\slash 'quote'\nnewline\rcarriage return"});
-
-        assert_eq!(
-            to_lua_literal(&value, None),
-            indoc! {r"
-                return {
-                  value = 'back\\slash \'quote\'\nnewline\rcarriage return',
-                }
-            "}
-        );
-    }
-
-    #[test]
-    fn test_to_lua_literal_renders_scalars_and_empty_containers() {
-        let value = json!({
+        }),
+        indoc! {"
+            return {
+              ['foo-bar'] = 1,
+              ['1leading'] = 2,
+              ['end'] = 3,
+              valid_key = 4,
+            }
+        "}
+    )]
+    #[case::escapes_special_characters_in_strings(
+        json!({"value": "back\\slash 'quote'\nnewline\rcarriage return"}),
+        indoc! {r"
+            return {
+              value = 'back\\slash \'quote\'\nnewline\rcarriage return',
+            }
+        "}
+    )]
+    #[case::scalars_and_empty_containers(
+        json!({
             "number": 42,
             "float": 3.5,
             "bool_true": true,
@@ -205,38 +187,31 @@ mod tests {
             "null": null,
             "empty_array": [],
             "empty_object": {},
-        });
-
-        assert_eq!(
-            to_lua_literal(&value, None),
-            indoc! {"
-                return {
-                  number = 42,
-                  float = 3.5,
-                  bool_true = true,
-                  bool_false = false,
-                  null = nil,
-                  empty_array = {},
-                  empty_object = {},
-                }
-            "}
-        );
-    }
-
-    #[test]
-    fn test_to_lua_literal_renders_array_of_scalars() {
-        let value = json!([1, 2, 3]);
-
-        assert_eq!(
-            to_lua_literal(&value, None),
-            indoc! {"
-                return {
-                  1,
-                  2,
-                  3,
-                }
-            "}
-        );
+        }),
+        indoc! {"
+            return {
+              number = 42,
+              float = 3.5,
+              bool_true = true,
+              bool_false = false,
+              null = nil,
+              empty_array = {},
+              empty_object = {},
+            }
+        "}
+    )]
+    #[case::array_of_scalars(
+        json!([1, 2, 3]),
+        indoc! {"
+            return {
+              1,
+              2,
+              3,
+            }
+        "}
+    )]
+    fn test_to_lua_literal_renders(#[case] value: Value, #[case] expected: &str) {
+        assert_eq!(to_lua_literal(&value, None), expected);
     }
 
     #[rstest]
