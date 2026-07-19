@@ -105,22 +105,12 @@ fn diff_objects(
         let child_path = format!("{path}/{}", escape_token(key));
         match after.get(key) {
             Some(after_value) => diff_values(&child_path, before_value, after_value, out),
-            None => out.push(Change {
-                path: child_path,
-                kind: ChangeKind::Remove,
-                before: Some(before_value.clone()),
-                after: None,
-            }),
+            None => push_remove(out, child_path, before_value),
         }
     }
     for (key, after_value) in after {
         if !before.contains_key(key) {
-            out.push(Change {
-                path: format!("{path}/{}", escape_token(key)),
-                kind: ChangeKind::Add,
-                before: None,
-                after: Some(after_value.clone()),
-            });
+            push_add(out, format!("{path}/{}", escape_token(key)), after_value);
         }
     }
 }
@@ -133,21 +123,29 @@ fn diff_arrays(path: &str, before: &[Value], after: &[Value], out: &mut Vec<Chan
         diff_values(&format!("{path}/{index}"), before_value, after_value, out);
     }
     for (index, before_value) in before.iter().enumerate().skip(common) {
-        out.push(Change {
-            path: format!("{path}/{index}"),
-            kind: ChangeKind::Remove,
-            before: Some(before_value.clone()),
-            after: None,
-        });
+        push_remove(out, format!("{path}/{index}"), before_value);
     }
     for (index, after_value) in after.iter().enumerate().skip(common) {
-        out.push(Change {
-            path: format!("{path}/{index}"),
-            kind: ChangeKind::Add,
-            before: None,
-            after: Some(after_value.clone()),
-        });
+        push_add(out, format!("{path}/{index}"), after_value);
     }
+}
+
+fn push_remove(out: &mut Vec<Change>, path: String, before: &Value) {
+    out.push(Change {
+        path,
+        kind: ChangeKind::Remove,
+        before: Some(before.clone()),
+        after: None,
+    });
+}
+
+fn push_add(out: &mut Vec<Change>, path: String, after: &Value) {
+    out.push(Change {
+        path,
+        kind: ChangeKind::Add,
+        before: None,
+        after: Some(after.clone()),
+    });
 }
 
 /// Escapes a single reference token per RFC 6901: `~` becomes `~0` and `/`
