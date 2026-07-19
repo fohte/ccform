@@ -41,9 +41,11 @@ fn write_value(out: &mut String, value: &Value, depth: usize) {
     }
 }
 
-/// Single-quotes `s`, escaping only the three characters that would
-/// otherwise break out of the Lua string literal or corrupt its content:
-/// backslash, single quote, and newline.
+/// Single-quotes `s`, escaping the characters that would otherwise break out
+/// of the Lua string literal or corrupt its content: backslash, single
+/// quote, and line breaks. An unescaped `\r` inside a Lua short string is as
+/// fatal as an unescaped `\n` — the lexer treats it as an unterminated
+/// string — so both are escaped.
 fn write_string(out: &mut String, s: &str) {
     out.push('\'');
     for c in s.chars() {
@@ -51,6 +53,7 @@ fn write_string(out: &mut String, s: &str) {
             '\\' => out.push_str("\\\\"),
             '\'' => out.push_str("\\'"),
             '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
             _ => out.push(c),
         }
     }
@@ -172,13 +175,13 @@ mod tests {
 
     #[test]
     fn test_to_lua_literal_escapes_special_characters_in_strings() {
-        let value = json!({"value": "back\\slash 'quote'\nnewline"});
+        let value = json!({"value": "back\\slash 'quote'\nnewline\rcarriage return"});
 
         assert_eq!(
             to_lua_literal(&value, None),
             indoc! {r"
                 return {
-                  value = 'back\\slash \'quote\'\nnewline',
+                  value = 'back\\slash \'quote\'\nnewline\rcarriage return',
                 }
             "}
         );
