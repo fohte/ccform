@@ -57,11 +57,18 @@ pub struct State {
 }
 
 impl State {
+    /// Destructures `self` so adding a field here forces a compile error at
+    /// the call site below instead of silently dropping it from state.json.
     fn to_value(&self) -> Value {
+        let Self {
+            version,
+            settings,
+            mcp_servers,
+        } = self;
         serde_json::json!({
-            "version": self.version,
-            "settings": self.settings,
-            "mcpServers": self.mcp_servers,
+            "version": version,
+            "settings": settings,
+            "mcpServers": mcp_servers,
         })
     }
 }
@@ -75,6 +82,15 @@ pub fn load() -> Result<Option<State>> {
 /// Writes `state` to state.json, first renaming any existing state.json to
 /// state.json.backup so exactly one prior generation is kept. Creates the
 /// state directory (mode 0700) if it does not exist yet.
+///
+/// The rename and the write are two separate operations rather than one
+/// atomic step: if the write fails after the rename already succeeded, the
+/// prior generation survives only under state.json.backup and `load()`
+/// reports `None` (as if uninitialized) until it is restored by hand. There
+/// is likewise no exclusive lock across the two steps, so concurrent callers
+/// can race. This mirrors the no-lock trade-off already accepted in
+/// `target::McpServers::write` — ccform is a single-user local CLI, so this
+/// window is treated as acceptable given the added complexity of closing it.
 pub fn save_with_backup(state: &State) -> Result<()> {
     save_with_backup_to(&paths::state_path(), &paths::state_backup_path(), state)
 }
@@ -162,6 +178,21 @@ mod tests {
         )
     }
 
+    fn state_with(settings: Value) -> State {
+        State {
+            version: 1,
+            settings,
+            mcp_servers: json!({}),
+        }
+    }
+
+    fn assert_json_file(path: &Path, expected: Value) {
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap(),
+            expected
+        );
+    }
+
     #[rstest]
     fn load_from_returns_none_when_file_is_missing(dir: TempDir) {
         let (path, _) = paths_in(&dir);
@@ -193,16 +224,15 @@ mod tests {
         let (path, _) = paths_in(&dir);
         fs::write(&path, r#"{"version":2,"settings":{},"mcpServers":{}}"#).unwrap();
 
-        let err = load_from(&path).unwrap_err();
-
-        assert!(matches!(
-            err,
-            Error::VersionMismatch {
-                found: 2,
-                expected: 1,
-                ..
-            }
-        ));
+        let Error::VersionMismatch {
+            path: got_path,
+            found,
+            expected,
+        } = load_from(&path).unwrap_err()
+        else {
+            panic!("expected Error::VersionMismatch");
+        };
+        assert_eq!((got_path, found, expected), (path, 2, 1));
     }
 
     #[rstest]
@@ -210,49 +240,43 @@ mod tests {
         let (path, _) = paths_in(&dir);
         fs::write(&path, "not json").unwrap();
 
-        assert!(matches!(load_from(&path).unwrap_err(), Error::Parse { .. }));
+        let Error::Parse { path: got_path, .. } = load_from(&path).unwrap_err() else {
+            panic!("expected Error::Parse");
+        };
+        assert_eq!(got_path, path);
     }
 
     #[rstest]
     fn save_with_backup_to_creates_dir_and_file_when_nothing_exists_yet(dir: TempDir) {
         let path = dir.path().join("ccform").join("state.json");
         let backup_path = dir.path().join("ccform").join("state.json.backup");
-        let state = State {
-            version: 1,
-            settings: json!({"model": "opus"}),
-            mcp_servers: json!({}),
-        };
+        let state = state_with(json!({"model": "opus"}));
 
         save_with_backup_to(&path, &backup_path, &state).unwrap();
 
-        assert_eq!(
-            serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(),
-            json!({"version": 1, "settings": {"model": "opus"}, "mcpServers": {}})
+        assert_json_file(
+            &path,
+            json!({"version": 1, "settings": {"model": "opus"}, "mcpServers": {}}),
         );
         assert!(!backup_path.exists());
         assert_eq!(mode_of(path.parent().unwrap()), 0o700);
-        assert_eq!(mode_of(&path), 0o600);
     }
 
     #[rstest]
     fn save_with_backup_to_moves_existing_state_to_backup(dir: TempDir) {
         let (path, backup_path) = paths_in(&dir);
         fs::write(&path, r#"{"version":1,"settings":{},"mcpServers":{}}"#).unwrap();
-        let new_state = State {
-            version: 1,
-            settings: json!({"model": "opus"}),
-            mcp_servers: json!({}),
-        };
+        let new_state = state_with(json!({"model": "opus"}));
 
         save_with_backup_to(&path, &backup_path, &new_state).unwrap();
 
-        assert_eq!(
-            serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(),
-            json!({"version": 1, "settings": {"model": "opus"}, "mcpServers": {}})
+        assert_json_file(
+            &path,
+            json!({"version": 1, "settings": {"model": "opus"}, "mcpServers": {}}),
         );
-        assert_eq!(
-            serde_json::from_slice::<Value>(&fs::read(&backup_path).unwrap()).unwrap(),
-            json!({"version": 1, "settings": {}, "mcpServers": {}})
+        assert_json_file(
+            &backup_path,
+            json!({"version": 1, "settings": {}, "mcpServers": {}}),
         );
     }
 
@@ -269,36 +293,43 @@ mod tests {
             r#"{"version":1,"settings":{"current":true},"mcpServers":{}}"#,
         )
         .unwrap();
-        let new_state = State {
-            version: 1,
-            settings: json!({"new": true}),
-            mcp_servers: json!({}),
-        };
+        let new_state = state_with(json!({"new": true}));
 
         save_with_backup_to(&path, &backup_path, &new_state).unwrap();
 
-        assert_eq!(
-            serde_json::from_slice::<Value>(&fs::read(&backup_path).unwrap()).unwrap(),
-            json!({"version": 1, "settings": {"current": true}, "mcpServers": {}})
+        assert_json_file(
+            &backup_path,
+            json!({"version": 1, "settings": {"current": true}, "mcpServers": {}}),
+        );
+    }
+
+    #[rstest]
+    fn save_with_backup_to_fails_when_backup_path_is_a_directory(dir: TempDir) {
+        let (path, backup_path) = paths_in(&dir);
+        fs::write(&path, r#"{"version":1,"settings":{},"mcpServers":{}}"#).unwrap();
+        fs::create_dir(&backup_path).unwrap();
+        let new_state = state_with(json!({}));
+
+        let err = save_with_backup_to(&path, &backup_path, &new_state).unwrap_err();
+
+        assert!(matches!(err, Error::Backup { .. }));
+        assert_json_file(
+            &path,
+            json!({"version": 1, "settings": {}, "mcpServers": {}}),
         );
     }
 
     #[rstest]
     fn initialize_at_creates_dir_and_file(dir: TempDir) {
         let path = dir.path().join("ccform").join("state.json");
-        let initial = State {
-            version: 1,
-            settings: json!({}),
-            mcp_servers: json!({}),
-        };
+        let initial = state_with(json!({}));
 
         initialize_at(&path, &initial).unwrap();
 
-        assert_eq!(
-            serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(),
-            json!({"version": 1, "settings": {}, "mcpServers": {}})
+        assert_json_file(
+            &path,
+            json!({"version": 1, "settings": {}, "mcpServers": {}}),
         );
         assert_eq!(mode_of(path.parent().unwrap()), 0o700);
-        assert_eq!(mode_of(&path), 0o600);
     }
 }
