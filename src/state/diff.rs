@@ -8,11 +8,13 @@
 
 use std::borrow::Cow;
 
+use serde::Serialize;
 use serde_json::{Map, Value};
 
 /// How a value at a given [`Change::path`] differs between the two trees
 /// being compared.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
     /// The path is absent on the left side and present on the right.
     Add,
@@ -23,7 +25,7 @@ pub enum ChangeKind {
 }
 
 /// A single difference between two JSON trees at `path`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Change {
     /// RFC 6901 JSON Pointer, relative to the root of the tree being
     /// compared (e.g. `/permissions/allow/0`).
@@ -34,7 +36,7 @@ pub struct Change {
 }
 
 /// The three diffs `ccform` needs for a single `settings`/`mcpServers` tree.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiffReport {
     /// `desired` vs `actual`: the changes `apply` would make.
     pub plan: Vec<Change>,
