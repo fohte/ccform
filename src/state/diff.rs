@@ -50,6 +50,38 @@ pub struct DiffReport {
     pub import_candidates: Vec<Change>,
 }
 
+/// Test-only constructors, shared by this module's tests and by
+/// `cli::render`'s, which both need to build [`Change`] values by hand.
+#[cfg(test)]
+impl Change {
+    pub(crate) fn add(path: &str, after: Value) -> Change {
+        Change {
+            path: path.to_string(),
+            kind: ChangeKind::Add,
+            before: None,
+            after: Some(after),
+        }
+    }
+
+    pub(crate) fn remove(path: &str, before: Value) -> Change {
+        Change {
+            path: path.to_string(),
+            kind: ChangeKind::Remove,
+            before: Some(before),
+            after: None,
+        }
+    }
+
+    pub(crate) fn replace(path: &str, before: Value, after: Value) -> Change {
+        Change {
+            path: path.to_string(),
+            kind: ChangeKind::Replace,
+            before: Some(before),
+            after: Some(after),
+        }
+    }
+}
+
 /// Computes the 3-way diff for one JSON tree. `state` is `None` when no
 /// `apply` has run yet, in which case `drift` is always empty.
 pub fn compute_diff(state: Option<&Value>, actual: &Value, desired: &Value) -> DiffReport {
@@ -171,33 +203,6 @@ mod tests {
 
     use super::*;
 
-    fn add(path: &str, after: Value) -> Change {
-        Change {
-            path: path.to_string(),
-            kind: ChangeKind::Add,
-            before: None,
-            after: Some(after),
-        }
-    }
-
-    fn remove(path: &str, before: Value) -> Change {
-        Change {
-            path: path.to_string(),
-            kind: ChangeKind::Remove,
-            before: Some(before),
-            after: None,
-        }
-    }
-
-    fn replace(path: &str, before: Value, after: Value) -> Change {
-        Change {
-            path: path.to_string(),
-            kind: ChangeKind::Replace,
-            before: Some(before),
-            after: Some(after),
-        }
-    }
-
     #[rstest]
     #[case::all_three_equal_yields_no_differences(
         Some(json!({"model": "opus"})),
@@ -210,7 +215,7 @@ mod tests {
         json!({}),
         json!({"model": "opus"}),
         DiffReport {
-            plan: vec![add("/model", json!("opus"))],
+            plan: vec![Change::add("/model", json!("opus"))],
             drift: vec![],
             import_candidates: vec![],
         }
@@ -220,9 +225,9 @@ mod tests {
         json!({"model": "opus"}),
         json!({}),
         DiffReport {
-            plan: vec![remove("/model", json!("opus"))],
+            plan: vec![Change::remove("/model", json!("opus"))],
             drift: vec![],
-            import_candidates: vec![add("/model", json!("opus"))],
+            import_candidates: vec![Change::add("/model", json!("opus"))],
         }
     )]
     #[case::state_diverging_from_actual_shows_up_in_drift(
@@ -231,7 +236,7 @@ mod tests {
         json!({"model": "sonnet"}),
         DiffReport {
             plan: vec![],
-            drift: vec![replace("/model", json!("opus"), json!("sonnet"))],
+            drift: vec![Change::replace("/model", json!("opus"), json!("sonnet"))],
             import_candidates: vec![],
         }
     )]
@@ -240,7 +245,7 @@ mod tests {
         json!({"model": "sonnet"}),
         json!({"model": "opus"}),
         DiffReport {
-            plan: vec![replace("/model", json!("sonnet"), json!("opus"))],
+            plan: vec![Change::replace("/model", json!("sonnet"), json!("opus"))],
             drift: vec![],
             import_candidates: vec![],
         }
@@ -250,9 +255,9 @@ mod tests {
         json!({"model": "opus", "extra": true}),
         json!({"model": "opus"}),
         DiffReport {
-            plan: vec![remove("/extra", json!(true))],
+            plan: vec![Change::remove("/extra", json!(true))],
             drift: vec![],
-            import_candidates: vec![add("/extra", json!(true))],
+            import_candidates: vec![Change::add("/extra", json!(true))],
         }
     )]
     #[case::a_value_that_differs_on_both_sides_is_not_an_import_candidate(
@@ -260,7 +265,7 @@ mod tests {
         json!({"model": "sonnet"}),
         json!({"model": "opus"}),
         DiffReport {
-            plan: vec![replace("/model", json!("sonnet"), json!("opus"))],
+            plan: vec![Change::replace("/model", json!("sonnet"), json!("opus"))],
             drift: vec![],
             import_candidates: vec![],
         }
@@ -270,7 +275,7 @@ mod tests {
         json!({"permissions": {"allow": ["Bash(ls:*)"]}}),
         json!({"permissions": {"allow": ["Bash(ls:*)"], "deny": ["Bash(rm:*)"]}}),
         DiffReport {
-            plan: vec![add("/permissions/deny", json!(["Bash(rm:*)"]))],
+            plan: vec![Change::add("/permissions/deny", json!(["Bash(rm:*)"]))],
             drift: vec![],
             import_candidates: vec![],
         }
@@ -281,8 +286,8 @@ mod tests {
         json!({"allow": ["a", "c", "d"]}),
         DiffReport {
             plan: vec![
-                replace("/allow/1", json!("b"), json!("c")),
-                add("/allow/2", json!("d")),
+                Change::replace("/allow/1", json!("b"), json!("c")),
+                Change::add("/allow/2", json!("d")),
             ],
             drift: vec![],
             import_candidates: vec![],
@@ -293,7 +298,7 @@ mod tests {
         json!({"a": "scalar"}),
         json!({"a": {"x": 1}}),
         DiffReport {
-            plan: vec![replace("/a", json!("scalar"), json!({"x": 1}))],
+            plan: vec![Change::replace("/a", json!("scalar"), json!({"x": 1}))],
             drift: vec![],
             import_candidates: vec![],
         }
@@ -303,7 +308,7 @@ mod tests {
         json!({}),
         json!({"a/b~c": 1}),
         DiffReport {
-            plan: vec![add("/a~1b~0c", json!(1))],
+            plan: vec![Change::add("/a~1b~0c", json!(1))],
             drift: vec![],
             import_candidates: vec![],
         }

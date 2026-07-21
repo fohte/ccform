@@ -1,5 +1,5 @@
 //! Renders `state::diff::DiffReport`s for `ccform plan`/`apply`: Terraform-style
-//! structured text by default, or machine-readable JSON with `-json`.
+//! structured text by default, or machine-readable JSON with `--json`/`-j`.
 //!
 //! A single invocation covers both the `settings` and `mcpServers` trees, so
 //! every function here takes a `reports` slice of `(name, report)` pairs
@@ -134,12 +134,12 @@ fn render_change_groups(
 }
 
 fn render_change_line(change: &Change, use_color: bool) -> String {
+    let path = sanitize_for_terminal(&change.path);
     let line = match change.kind {
-        ChangeKind::Add => format!("+ {} = {}", change.path, format_value(&change.after)),
-        ChangeKind::Remove => format!("- {} = {}", change.path, format_value(&change.before)),
+        ChangeKind::Add => format!("+ {path} = {}", format_value(&change.after)),
+        ChangeKind::Remove => format!("- {path} = {}", format_value(&change.before)),
         ChangeKind::Replace => format!(
-            "~ {} = {} -> {}",
-            change.path,
+            "~ {path} = {} -> {}",
             format_value(&change.before),
             format_value(&change.after)
         ),
@@ -163,6 +163,18 @@ fn format_value(value: &Option<Value>) -> String {
     }
 }
 
+/// Replaces ASCII control characters with U+FFFD before `path` (a JSON
+/// object key from the settings/mcpServers files being diffed, i.e.
+/// attacker-controlled) reaches the terminal, so it cannot smuggle in
+/// escape sequences that hide or rewrite what `plan`/`apply` displays.
+/// `format_value`'s values go through `serde_json::Value`'s `Display`,
+/// which already escapes control characters as part of JSON string syntax.
+fn sanitize_for_terminal(path: &str) -> String {
+    path.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use indoc::indoc;
@@ -170,137 +182,105 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::state::diff::ChangeKind;
-
-    fn add(path: &str, after: Value) -> Change {
-        Change {
-            path: path.to_string(),
-            kind: ChangeKind::Add,
-            before: None,
-            after: Some(after),
-        }
-    }
-
-    fn remove(path: &str, before: Value) -> Change {
-        Change {
-            path: path.to_string(),
-            kind: ChangeKind::Remove,
-            before: Some(before),
-            after: None,
-        }
-    }
-
-    fn replace(path: &str, before: Value, after: Value) -> Change {
-        Change {
-            path: path.to_string(),
-            kind: ChangeKind::Replace,
-            before: Some(before),
-            after: Some(after),
-        }
-    }
 
     #[rstest]
-    fn render_text_shows_no_changes_as_a_zero_summary_with_no_blocks() {
-        let settings = DiffReport {
+    #[case::no_changes_yields_zero_summary_with_no_blocks(
+        vec![("settings", DiffReport { plan: vec![], drift: vec![], import_candidates: vec![] })],
+        false,
+        "Plan: 0 to add, 0 to change, 0 to remove.\n".to_string(),
+    )]
+    #[case::drift_block_is_shown_even_when_plan_is_empty(
+        vec![("settings", DiffReport {
             plan: vec![],
+            drift: vec![Change::add("/x", json!(1))],
+            import_candidates: vec![],
+        })],
+        false,
+        indoc! {"
+            Drift detected (1 to add, 0 to change, 0 to remove):
+
+            settings:
+              + /x = 1
+
+            Plan: 0 to add, 0 to change, 0 to remove.
+        "}.to_string(),
+    )]
+    #[case::drift_and_plan_changes_are_grouped_by_report_name(
+        vec![
+            ("settings", DiffReport {
+                plan: vec![Change::replace("/model", json!("sonnet"), json!("opus"))],
+                drift: vec![
+                    Change::replace("/model", json!("opus"), json!("sonnet")),
+                    Change::add("/extra", json!(true)),
+                ],
+                import_candidates: vec![Change::add("/extra", json!(true))],
+            }),
+            ("mcpServers", DiffReport {
+                plan: vec![Change::add("/foo", json!({"command": "bar"}))],
+                drift: vec![],
+                import_candidates: vec![],
+            }),
+        ],
+        false,
+        indoc! {r#"
+            Drift detected (1 to add, 1 to change, 0 to remove):
+
+            settings:
+              ~ /model = "opus" -> "sonnet"
+              + /extra = true
+
+            Plan: 1 to add, 1 to change, 0 to remove.
+
+            settings:
+              ~ /model = "sonnet" -> "opus"
+
+            mcpServers:
+              + /foo = {"command":"bar"}
+        "#}.to_string(),
+    )]
+    #[case::control_characters_in_a_path_are_sanitized_so_they_cannot_smuggle_terminal_escapes(
+        vec![("settings", DiffReport {
+            plan: vec![Change::add("/a\u{1b}[8mhidden\u{1b}[0m", json!(1))],
             drift: vec![],
             import_candidates: vec![],
-        };
-        let reports: [(&str, &DiffReport); 1] = [("settings", &settings)];
-
-        assert_eq!(
-            render_text(&reports, false),
-            "Plan: 0 to add, 0 to change, 0 to remove.\n"
-        );
-    }
-
-    #[rstest]
-    fn render_text_shows_drift_block_even_when_plan_is_empty() {
-        let settings = DiffReport {
-            plan: vec![],
-            drift: vec![add("/x", json!(1))],
-            import_candidates: vec![],
-        };
-        let reports: [(&str, &DiffReport); 1] = [("settings", &settings)];
-
-        assert_eq!(
-            render_text(&reports, false),
-            indoc! {"
-                Drift detected (1 to add, 0 to change, 0 to remove):
-
-                settings:
-                  + /x = 1
-
-                Plan: 0 to add, 0 to change, 0 to remove.
-            "}
-        );
-    }
-
-    #[rstest]
-    fn render_text_groups_drift_and_plan_changes_by_report_name() {
-        let settings = DiffReport {
-            plan: vec![replace("/model", json!("sonnet"), json!("opus"))],
-            drift: vec![
-                replace("/model", json!("opus"), json!("sonnet")),
-                add("/extra", json!(true)),
-            ],
-            import_candidates: vec![add("/extra", json!(true))],
-        };
-        let mcp_servers = DiffReport {
-            plan: vec![add("/foo", json!({"command": "bar"}))],
-            drift: vec![],
-            import_candidates: vec![],
-        };
-        let reports: [(&str, &DiffReport); 2] =
-            [("settings", &settings), ("mcpServers", &mcp_servers)];
-
-        assert_eq!(
-            render_text(&reports, false),
-            indoc! {r#"
-                Drift detected (1 to add, 1 to change, 0 to remove):
-
-                settings:
-                  ~ /model = "opus" -> "sonnet"
-                  + /extra = true
-
-                Plan: 1 to add, 1 to change, 0 to remove.
-
-                settings:
-                  ~ /model = "sonnet" -> "opus"
-
-                mcpServers:
-                  + /foo = {"command":"bar"}
-            "#}
-        );
-    }
-
-    #[rstest]
-    fn render_text_colors_each_line_by_change_kind_when_color_is_enabled() {
-        let settings = DiffReport {
+        })],
+        false,
+        "Plan: 1 to add, 0 to change, 0 to remove.\n\nsettings:\n  + /a\u{fffd}[8mhidden\u{fffd}[0m = 1\n".to_string(),
+    )]
+    #[case::each_line_is_colored_by_change_kind_when_color_is_enabled(
+        vec![("settings", DiffReport {
             plan: vec![
-                add("/a", json!(1)),
-                remove("/b", json!(2)),
-                replace("/c", json!(3), json!(4)),
+                Change::add("/a", json!(1)),
+                Change::remove("/b", json!(2)),
+                Change::replace("/c", json!(3), json!(4)),
             ],
             drift: vec![],
             import_candidates: vec![],
-        };
-        let reports: [(&str, &DiffReport); 1] = [("settings", &settings)];
+        })],
+        true,
+        format!(
+            "Plan: 1 to add, 1 to change, 1 to remove.\n\nsettings:\n  {GREEN}+ /a = 1{RESET}\n  {RED}- /b = 2{RESET}\n  {YELLOW}~ /c = 3 -> 4{RESET}\n"
+        ),
+    )]
+    fn test_render_text(
+        #[case] reports: Vec<(&str, DiffReport)>,
+        #[case] use_color: bool,
+        #[case] expected: String,
+    ) {
+        let refs: Vec<(&str, &DiffReport)> = reports
+            .iter()
+            .map(|(name, report)| (*name, report))
+            .collect();
 
-        assert_eq!(
-            render_text(&reports, true),
-            format!(
-                "Plan: 1 to add, 1 to change, 1 to remove.\n\nsettings:\n  {GREEN}+ /a = 1{RESET}\n  {RED}- /b = 2{RESET}\n  {YELLOW}~ /c = 3 -> 4{RESET}\n"
-            )
-        );
+        assert_eq!(render_text(&refs, use_color), expected);
     }
 
     #[rstest]
     fn render_json_bundles_named_reports_and_includes_every_diff_report_field() {
         let settings = DiffReport {
-            plan: vec![add("/a", json!(1))],
+            plan: vec![Change::add("/a", json!(1))],
             drift: vec![],
-            import_candidates: vec![remove("/b", json!(2))],
+            import_candidates: vec![Change::remove("/b", json!(2))],
         };
         let mcp_servers = DiffReport {
             plan: vec![],
