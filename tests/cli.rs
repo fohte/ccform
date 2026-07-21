@@ -1,5 +1,6 @@
-//! End-to-end checks that the compiled `ccform` binary exits with the codes
-//! clap's derive parser produces for usage errors, help, and version.
+//! End-to-end checks that `fn main` wires `Cli::parse()` up correctly: the
+//! process actually exits with the codes clap's derive parser produces,
+//! rather than that behavior being caught or altered on the way out.
 
 use std::process::Command;
 
@@ -12,13 +13,20 @@ fn ccform(args: &[&str]) -> Command {
 }
 
 #[rstest]
-#[case::unknown_subcommand(&["bogus"], 2)]
-#[case::missing_subcommand(&[], 2)]
-#[case::top_level_help(&["--help"], 0)]
-#[case::top_level_version(&["--version"], 0)]
-#[case::subcommand_help(&["apply", "--help"], 0)]
-fn test_exit_code(#[case] args: &[&str], #[case] expected_code: i32) {
+#[case::unknown_subcommand(&["bogus"])]
+#[case::missing_subcommand(&[])]
+fn test_invalid_arguments_exit_with_usage_error(#[case] args: &[&str]) {
     let status = ccform(args).status().unwrap();
 
-    assert_eq!(status.code(), Some(expected_code));
+    assert_eq!(status.code(), Some(2));
+}
+
+#[rstest]
+#[case::top_level_help(&["--help"])]
+#[case::top_level_version(&["--version"])]
+#[case::subcommand_help(&["apply", "--help"])]
+fn test_help_and_version_exit_successfully(#[case] args: &[&str]) {
+    let status = ccform(args).status().unwrap();
+
+    assert_eq!(status.code(), Some(0));
 }

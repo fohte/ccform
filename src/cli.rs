@@ -27,7 +27,6 @@ pub enum Command {
     Import(ImportArgs),
 }
 
-/// `ccform init` arguments.
 #[derive(Debug, PartialEq, Args)]
 pub struct InitArgs {
     /// Overwrites ccform.lua and state.json if they already exist.
@@ -35,7 +34,6 @@ pub struct InitArgs {
     pub force: bool,
 }
 
-/// `ccform plan` arguments.
 #[derive(Debug, PartialEq, Args)]
 pub struct PlanArgs {
     /// Prints the plan as JSON instead of human-readable text.
@@ -43,7 +41,6 @@ pub struct PlanArgs {
     pub json: bool,
 }
 
-/// `ccform apply` arguments.
 #[derive(Debug, PartialEq, Args)]
 pub struct ApplyArgs {
     /// Skips the interactive confirmation prompt.
@@ -51,11 +48,9 @@ pub struct ApplyArgs {
     pub auto_approve: bool,
 }
 
-/// `ccform show` arguments.
 #[derive(Debug, PartialEq, Args)]
 pub struct ShowArgs {}
 
-/// `ccform import` arguments.
 #[derive(Debug, PartialEq, Args)]
 pub struct ImportArgs {}
 
@@ -83,15 +78,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_unknown_subcommand_fails_with_exit_code_2() {
-        let err = Cli::try_parse_from(["ccform", "bogus"]).unwrap_err();
-
-        assert_eq!(err.exit_code(), 2);
-    }
-
-    #[rstest]
-    fn test_missing_subcommand_fails_with_exit_code_2() {
-        let err = Cli::try_parse_from(["ccform"]).unwrap_err();
+    #[case::unknown_subcommand(&["ccform", "bogus"])]
+    #[case::missing_subcommand(&["ccform"])]
+    fn test_invalid_invocation_fails_with_exit_code_2(#[case] argv: &[&str]) {
+        let err = Cli::try_parse_from(argv).unwrap_err();
 
         assert_eq!(err.exit_code(), 2);
     }
