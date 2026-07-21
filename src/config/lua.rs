@@ -64,6 +64,13 @@ impl Runtime {
         Ok(Self { lua })
     }
 
+    /// Exposes the Lua VM backing this runtime, e.g. so
+    /// `config::loader::partition_root` can use it to build the empty
+    /// tables it defaults missing `settings`/`mcpServers` keys to.
+    pub(crate) fn lua(&self) -> &Lua {
+        &self.lua
+    }
+
     /// Reads `path` and evaluates it as a Lua chunk, returning its return
     /// value as-is (no validation of its shape). Lua syntax and runtime
     /// errors propagate as `mlua::Error`, named after `path` so any position
