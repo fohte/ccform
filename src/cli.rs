@@ -5,6 +5,8 @@
 
 use clap::{Args, Parser, Subcommand};
 
+pub mod render;
+
 /// Terraform-style declarative manager for Claude Code settings via a Lua DSL.
 #[derive(Debug, Parser)]
 #[command(name = "ccform", version)]
