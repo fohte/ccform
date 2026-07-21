@@ -59,7 +59,9 @@ pub struct State {
 impl State {
     /// Destructures `self` so adding a field here forces a compile error at
     /// the call site below instead of silently dropping it from state.json.
-    fn to_value(&self) -> Value {
+    /// `pub(crate)` so `command::show` can render the same JSON shape that
+    /// gets written to disk.
+    pub(crate) fn to_value(&self) -> Value {
         let Self {
             version,
             settings,
