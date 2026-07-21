@@ -154,6 +154,32 @@ fn rejects_overwriting_an_existing_ccform_lua_without_force(env: Env) {
 }
 
 #[rstest]
+fn rejects_overwriting_an_existing_state_json_without_force(env: Env) {
+    fs::create_dir_all(env.state_path().parent().unwrap()).unwrap();
+    fs::write(
+        env.state_path(),
+        r#"{"version":1,"settings":{"model":"opus"},"mcpServers":{}}"#,
+    )
+    .unwrap();
+
+    let output = env.run(&["init"]);
+
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        format!(
+            "Error: {} already exists. Use --force to overwrite.\n",
+            env.state_path().display()
+        )
+    );
+    assert_eq!(
+        env.read_state(),
+        json!({"version": 1, "settings": {"model": "opus"}, "mcpServers": {}})
+    );
+    assert!(!env.entry_path().exists());
+}
+
+#[rstest]
 fn force_overwrites_an_existing_ccform_lua_and_state_json(env: Env) {
     fs::create_dir_all(env.entry_path().parent().unwrap()).unwrap();
     fs::write(env.entry_path(), EXISTING_CCFORM_LUA).unwrap();

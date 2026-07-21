@@ -37,12 +37,19 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Bootstraps `ccform.lua` and `state.json` from whatever is currently on
-/// disk. Fails with [`Error::AlreadyExists`] if `ccform.lua` is already
-/// present, unless `force` is set.
+/// disk. Fails with [`Error::AlreadyExists`] if `ccform.lua` or `state.json`
+/// is already present, unless `force` is set — matching the `--force` flag's
+/// documented contract of guarding both files.
 pub fn run(force: bool) -> Result<()> {
     let entry_path = paths::entry_path();
-    if entry_path.exists() && !force {
-        return Err(Error::AlreadyExists { path: entry_path });
+    let state_path = paths::state_path();
+    if !force {
+        if entry_path.exists() {
+            return Err(Error::AlreadyExists { path: entry_path });
+        }
+        if state_path.exists() {
+            return Err(Error::AlreadyExists { path: state_path });
+        }
     }
 
     let settings = Settings::new(paths::settings_path()).read()?;
