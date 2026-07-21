@@ -8,7 +8,7 @@ use crate::state::store;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{path} not found. Run `ccform init` and `ccform apply` first.")]
+    #[error("{path} not found. Run `ccform init` first.")]
     NotFound { path: PathBuf },
 
     #[error(transparent)]

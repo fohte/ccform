@@ -4,45 +4,24 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use indoc::indoc;
-use rstest::{fixture, rstest};
+use rstest::rstest;
 use serde_json::{Value, json};
-use tempfile::TempDir;
+
+mod common;
+use common::{Env, env};
 
 const EXISTING_CCFORM_LUA: &str = indoc! {"
     -- existing
     return {}
 "};
 
-// `#[cfg(test)]` below isn't conditional compilation — this whole file is
-// already only built for `cargo test` — it's there so clippy's
-// `allow-unwrap-in-tests` recognizes the `unwrap()` calls as test code:
-// that check looks for the attribute on an enclosing item, and rstest's
-// `#[fixture]` macro regenerates the function it wraps and drops any
-// attribute it doesn't itself recognize, which is why `new_env` is a plain
-// function the `env` fixture delegates to rather than being annotated
-// directly.
-#[cfg(test)]
-struct Env {
-    home: TempDir,
-    config: TempDir,
-    state: TempDir,
-}
-
+// See the equivalent comment in tests/common/mod.rs for why this needs
+// `#[cfg(test)]` despite the whole file already being test-only.
 #[cfg(test)]
 impl Env {
-    fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_ccform"))
-            .args(args)
-            .env("HOME", self.home.path())
-            .env("XDG_CONFIG_HOME", self.config.path())
-            .env("XDG_STATE_HOME", self.state.path())
-            .output()
-            .unwrap()
-    }
-
     fn write_settings(&self, contents: &str) {
         let dir = self.home.path().join(".claude");
         fs::create_dir_all(&dir).unwrap();
@@ -57,27 +36,9 @@ impl Env {
         self.config.path().join("ccform").join("ccform.lua")
     }
 
-    fn state_path(&self) -> PathBuf {
-        self.state.path().join("ccform").join("state.json")
-    }
-
     fn read_state(&self) -> Value {
         serde_json::from_str(&fs::read_to_string(self.state_path()).unwrap()).unwrap()
     }
-}
-
-#[cfg(test)]
-fn new_env() -> Env {
-    Env {
-        home: tempfile::tempdir().unwrap(),
-        config: tempfile::tempdir().unwrap(),
-        state: tempfile::tempdir().unwrap(),
-    }
-}
-
-#[fixture]
-fn env() -> Env {
-    new_env()
 }
 
 #[cfg(test)]
