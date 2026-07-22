@@ -64,6 +64,12 @@ impl Runtime {
         Ok(Self { lua })
     }
 
+    /// The underlying Lua VM, for callers that need to pass it to functions
+    /// operating on Lua values it owns (e.g. `config::loader::partition_root`).
+    pub fn lua(&self) -> &Lua {
+        &self.lua
+    }
+
     /// Reads `path` and evaluates it as a Lua chunk, returning its return
     /// value as-is (no validation of its shape). Lua syntax and runtime
     /// errors propagate as `mlua::Error`, named after `path` so any position

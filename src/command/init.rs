@@ -53,15 +53,7 @@ pub fn run(force: bool) -> Result<()> {
     }
 
     let settings = Settings::new(paths::settings_path()).read()?;
-    let mcp_servers = McpServers::from_home().read()?;
-    // McpServers::read() reports a missing file or key as `Value::Null`, not
-    // an empty object, since callers other than `init` need to tell "absent"
-    // from "explicitly empty".
-    let mcp_servers = if mcp_servers.is_null() {
-        Value::Object(Map::new())
-    } else {
-        mcp_servers
-    };
+    let mcp_servers = McpServers::from_home().read_or_empty()?;
 
     let mut bootstrap = Map::new();
     bootstrap.insert("settings".to_string(), settings.clone());

@@ -59,6 +59,19 @@ impl McpServers {
         Ok(root.get(KEY).cloned().unwrap_or(Value::Null))
     }
 
+    /// Same as [`read`](Self::read), but reports a missing file or key as an
+    /// empty object instead of `Value::Null` — the shape callers that treat
+    /// "absent" and "explicitly empty" the same way (`init`, `plan`, `apply`)
+    /// actually want.
+    pub fn read_or_empty(&self) -> Result<Value> {
+        let value = self.read()?;
+        Ok(if value.is_null() {
+            Value::Object(Map::new())
+        } else {
+            value
+        })
+    }
+
     /// Replaces the `mcpServers` key with `desired`, preserving every other
     /// key and the file's existing key order. Creates the file with just
     /// `{"mcpServers": desired}` if it does not exist yet.
@@ -216,6 +229,30 @@ mod tests {
         let target = McpServers::new(path);
 
         assert_eq!(target.read().unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case::file_missing(None, json!({}))]
+    #[case::key_missing(
+        Some(r#"{"oauthAccount": {"email": "user@example.com"}}"#),
+        json!({})
+    )]
+    #[case::key_present(
+        Some(r#"{"mcpServers": {"a": 1}, "other": true}"#),
+        json!({"a": 1})
+    )]
+    fn read_or_empty_normalizes_absent_to_an_empty_object(
+        dir: tempfile::TempDir,
+        #[case] initial_content: Option<&str>,
+        #[case] expected: Value,
+    ) {
+        let path = dir.path().join(".claude.json");
+        if let Some(content) = initial_content {
+            fs::write(&path, content).unwrap();
+        }
+        let target = McpServers::new(path);
+
+        assert_eq!(target.read_or_empty().unwrap(), expected);
     }
 
     #[rstest]
