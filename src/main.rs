@@ -33,8 +33,9 @@ fn run_init(args: InitArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_plan(_args: PlanArgs) -> anyhow::Result<()> {
-    todo!()
+fn run_plan(args: PlanArgs) -> anyhow::Result<()> {
+    command::plan::run(args.json)?;
+    Ok(())
 }
 
 fn run_apply(_args: ApplyArgs) -> anyhow::Result<()> {
