@@ -47,5 +47,6 @@ fn run_show(_args: ShowArgs) -> anyhow::Result<()> {
 }
 
 fn run_import(_args: ImportArgs) -> anyhow::Result<()> {
-    todo!()
+    command::import::run()?;
+    Ok(())
 }
