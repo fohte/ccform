@@ -10,7 +10,7 @@ is_public: true
 project_name: ccform
 release_binary: true
 release_type: rust
-repo_id: ''
+repo_id: '1297146099'
 repo_language: en
 subpackages: []
 type: rust
