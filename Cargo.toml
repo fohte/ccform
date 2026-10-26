@@ -1,6 +1,6 @@
 [package]
 name = "ccform"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Terraform-style declarative manager for Claude Code settings via a Lua DSL"
 license = "MIT"
